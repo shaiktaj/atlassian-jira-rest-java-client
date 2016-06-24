@@ -42,9 +42,13 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.nio.charset.Charset;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Map;
+import javax.annotation.CheckForNull;
+import javax.annotation.Nonnull;
 
 /**
  * This is a base class for asynchronous REST clients.
@@ -66,7 +70,7 @@ public abstract class AbstractAsynchronousRestClient {
 	}
 
 	protected final <T> Promise<T> getAndParse(final URI uri, final JsonParser<?, T> parser) {
-		return callAndParse(client.newRequest(uri).setAccept("application/json").get(), parser);
+		return callAndParse(RequestInfo.get(uri), client.newRequest(uri).setAccept("application/json").get(), parser);
 	}
 
 	protected final <I, T> Promise<T> postAndParse(final URI uri, I entity, final JsonGenerator<I> jsonGenerator,
@@ -74,7 +78,7 @@ public abstract class AbstractAsynchronousRestClient {
 		final ResponsePromise responsePromise = client.newRequest(uri)
 				.setEntity(toEntity(jsonGenerator, entity))
 				.post();
-		return callAndParse(responsePromise, parser);
+		return callAndParse(RequestInfo.post(uri), responsePromise, parser);
 	}
 
 	protected final <T> Promise<T> postAndParse(final URI uri, final JSONObject entity, final JsonObjectParser<T> parser) {
@@ -82,7 +86,7 @@ public abstract class AbstractAsynchronousRestClient {
 				.setEntity(entity.toString())
 				.setContentType(JSON_CONTENT_TYPE)
 				.post();
-		return callAndParse(responsePromise, parser);
+		return callAndParse(RequestInfo.post(uri), responsePromise, parser);
 	}
 
 	protected final Promise<Void> post(final URI uri, final String entity) {
@@ -90,7 +94,7 @@ public abstract class AbstractAsynchronousRestClient {
 				.setEntity(entity)
 				.setContentType(JSON_CONTENT_TYPE)
 				.post();
-		return call(responsePromise);
+		return call(RequestInfo.post(uri), responsePromise);
 	}
 
 	protected final Promise<Void> post(final URI uri, final JSONObject entity) {
@@ -101,7 +105,7 @@ public abstract class AbstractAsynchronousRestClient {
 		final ResponsePromise responsePromise = client.newRequest(uri)
 				.setEntity(toEntity(jsonGenerator, entity))
 				.post();
-		return call(responsePromise);
+		return call(RequestInfo.post(uri), responsePromise);
 	}
 
 	protected final Promise<Void> post(final URI uri) {
@@ -113,33 +117,43 @@ public abstract class AbstractAsynchronousRestClient {
 		final ResponsePromise responsePromise = client.newRequest(uri)
 				.setEntity(toEntity(jsonGenerator, entity))
 				.put();
-		return callAndParse(responsePromise, parser);
+		return callAndParse(new RequestInfo(uri, "put"), responsePromise, parser);
 	}
 
 	protected final <T> Promise<Void> put(final URI uri, final T entity, final JsonGenerator<T> jsonGenerator) {
 		final ResponsePromise responsePromise = client.newRequest(uri)
 				.setEntity(toEntity(jsonGenerator, entity))
 				.put();
-		return call(responsePromise);
+		return call(RequestInfo.put(uri), responsePromise);
 	}
 
 	protected final Promise<Void> delete(final URI uri) {
 		final ResponsePromise responsePromise = client.newRequest(uri).delete();
-		return call(responsePromise);
+		return call(RequestInfo.delete(uri), responsePromise);
 	}
 
-	protected final <T> Promise<T> callAndParse(final ResponsePromise responsePromise, final ResponseHandler<T> responseHandler) {
+        @Deprecated
+        protected final <T> Promise<T> callAndParse(final ResponsePromise responsePromise, final ResponseHandler<T> responseHandler) {
+            return callAndParse(RequestInfo.EMPTY, responsePromise, responseHandler);
+        }
+        
+	protected final <T> Promise<T> callAndParse(final @Nonnull RequestInfo requestInfo, final ResponsePromise responsePromise, final ResponseHandler<T> responseHandler) {
 		final Function<Response, T> transformFunction = toFunction(responseHandler);
 		final ResponseTransformation<Object> responseTransformation = DefaultResponseTransformation.builder()
 				.ok(transformFunction)
 				.created(transformFunction)
-				.others(AbstractAsynchronousRestClient.errorFunction())
+				.others(AbstractAsynchronousRestClient.errorFunction(requestInfo))
 				.build();
 		return new DelegatingPromise(responsePromise.transform(responseTransformation));
 	}
 
+        @Deprecated
+        protected final <T> Promise<T> callAndParse(final ResponsePromise responsePromise, final JsonParser<?, T> parser)  {
+            return callAndParse(RequestInfo.EMPTY, responsePromise, parser);
+        }
+        
 	@SuppressWarnings("unchecked")
-	protected final <T> Promise<T> callAndParse(final ResponsePromise responsePromise, final JsonParser<?, T> parser) {
+	protected final <T> Promise<T> callAndParse(final @Nonnull RequestInfo requestInfo, final ResponsePromise responsePromise, final JsonParser<?, T> parser) {
 		final ResponseHandler<T> responseHandler = new ResponseHandler<T>() {
 			@Override
 			public T handle(Response response) throws JSONException, IOException {
@@ -149,15 +163,20 @@ public abstract class AbstractAsynchronousRestClient {
 						((JsonArrayParser) parser).parse(new JSONArray(body)));
 			}
 		};
-		return callAndParse(responsePromise, responseHandler);
+		return callAndParse(requestInfo, responsePromise, responseHandler);
 	}
 
-	protected final Promise<Void> call(final ResponsePromise responsePromise) {
+        @Deprecated
+        protected final Promise<Void> call(final ResponsePromise responsePromise) {
+            return call(RequestInfo.EMPTY, responsePromise);
+        }
+        
+	protected final Promise<Void> call(final @Nonnull RequestInfo requestInfo, final ResponsePromise responsePromise) {
 		final ResponseTransformation<Object> responseTransformation = DefaultResponseTransformation.builder()
 				.ok(constant((Void) null))
 				.created(constant((Void) null))
 				.noContent(constant((Void) null))
-				.others(AbstractAsynchronousRestClient.errorFunction())
+				.others(AbstractAsynchronousRestClient.errorFunction(requestInfo))
 				.build();
 		return new DelegatingPromise(responsePromise.transform(responseTransformation));
 	}
@@ -166,13 +185,18 @@ public abstract class AbstractAsynchronousRestClient {
 		return client;
 	}
 
-	private static <T> Function<Response, T> errorFunction() {
+	private static <T> Function<Response, T> errorFunction(final @Nonnull RequestInfo requestInfo) {
 		return new Function<Response, T>() {
 			@Override
 			public T apply(Response response) {
 				try {
 					final String body = response.getEntity();
-					final Collection<ErrorCollection> errorMessages = extractErrors(response.getStatusCode(), body);
+					Collection<ErrorCollection> extracted = extractErrors(response.getStatusCode(), body);
+					ArrayList<ErrorCollection> errorMessages = new ArrayList<ErrorCollection>(extracted.size() + 1);
+                                        errorMessages.addAll(extracted);
+                                        ErrorCollection c = new ErrorCollection( "Request failed. " +
+                                                    requestInfo + ": " + response.getStatusText());
+                                        errorMessages.add(c);
 					throw new RestClientException(errorMessages, response.getStatusCode());
 				} catch (JSONException e) {
 					throw new RestClientException(e, response.getStatusCode());
@@ -269,4 +293,41 @@ public abstract class AbstractAsynchronousRestClient {
 			}
 		};
 	}
+        
+        public static class RequestInfo {
+            private final URI uri;
+            private final String method;
+            
+            public static final RequestInfo EMPTY = new RequestInfo();
+
+            private RequestInfo() {
+                this(null, null);
+            }
+
+            private RequestInfo(@CheckForNull URI uri, @CheckForNull String method) {
+                this.uri = uri;
+                this.method = StringUtils.isBlank(method) ? "UNKNOWN_METHOD" : method;
+            }
+            
+            public static RequestInfo post(@Nonnull URI uri) {
+                return new RequestInfo(uri, "POST");
+            }
+            
+            public static RequestInfo get(@Nonnull URI uri) {
+                return new RequestInfo(uri, "GET");
+            }
+            
+            public static RequestInfo put(@Nonnull URI uri) {
+                return new RequestInfo(uri, "PUT");
+            }
+            
+            public static RequestInfo delete(@Nonnull URI uri) {
+                return new RequestInfo(uri, "DELETE");
+            }
+
+            @Override
+            public String toString() {
+                return method + " " +(uri != null ? uri : "unknown_uri");
+            }
+        }
 }

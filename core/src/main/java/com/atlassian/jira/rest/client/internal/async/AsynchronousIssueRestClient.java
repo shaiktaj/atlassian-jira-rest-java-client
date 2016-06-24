@@ -174,7 +174,7 @@ public class AsynchronousIssueRestClient extends AbstractAsynchronousRestClient 
 
 	@Override
 	public Promise<Iterable<Transition>> getTransitions(final URI transitionsUri) {
-		return callAndParse(client().newRequest(transitionsUri).get(),
+		return callAndParse(RequestInfo.get(transitionsUri), client().newRequest(transitionsUri).get(),
 				new AbstractAsynchronousRestClient.ResponseHandler<Iterable<Transition>>() {
 					@Override
 					public Iterable<Transition> handle(Response response) throws JSONException, IOException {
@@ -335,7 +335,7 @@ public class AsynchronousIssueRestClient extends AbstractAsynchronousRestClient 
 
 	@Override
 	public Promise<InputStream> getAttachment(URI attachmentUri) {
-		return callAndParse(client().newRequest(attachmentUri).get(),
+		return callAndParse(RequestInfo.get(attachmentUri), client().newRequest(attachmentUri).get(),
 				new ResponseHandler<InputStream>() {
 					@Override
 					public InputStream handle(final Response request) throws JSONException, IOException {
@@ -368,7 +368,7 @@ public class AsynchronousIssueRestClient extends AbstractAsynchronousRestClient 
 				.setEntity(new MultiPartEntityBuilder(multipartEntity))
 				.setHeader("X-Atlassian-Token", "nocheck")
 				.post();
-		return call(responsePromise);
+		return call(RequestInfo.post(attachmentsUri), responsePromise);
 	}
 
 	private String getLoggedUsername() {
