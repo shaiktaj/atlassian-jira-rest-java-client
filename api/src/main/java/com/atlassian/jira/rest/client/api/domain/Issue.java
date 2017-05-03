@@ -37,7 +37,7 @@ public class Issue extends BasicIssue implements ExpandableResource {
 
 	public Issue(String summary, URI self, String key, Long id, BasicProject project, IssueType issueType, Status status,
 			String description, @Nullable BasicPriority priority, @Nullable Resolution resolution, Collection<Attachment> attachments,
-			@Nullable User reporter, @Nullable User assignee, DateTime creationDate, DateTime updateDate, DateTime dueDate,
+			@Nullable User reporter, @Nullable User assignee, DateTime creationDate, DateTime updateDate, @Nullable DateTime dueDate,
 			Collection<Version> affectedVersions, Collection<Version> fixVersions, Collection<BasicComponent> components,
 			@Nullable TimeTracking timeTracking, Collection<IssueField> issueFields, Collection<Comment> comments,
 			@Nullable URI transitionsUri,
@@ -94,6 +94,7 @@ public class Issue extends BasicIssue implements ExpandableResource {
 	private final Collection<IssueField> issueFields;
 	private final DateTime creationDate;
 	private final DateTime updateDate;
+	@Nullable
 	private final DateTime dueDate;
 	private final BasicPriority priority;
 	private final BasicVotes votes;
@@ -339,6 +340,7 @@ public class Issue extends BasicIssue implements ExpandableResource {
 		return updateDate;
 	}
 
+	@Nullable
 	public DateTime getDueDate() {
 		return dueDate;
 	}
